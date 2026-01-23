@@ -1,0 +1,30 @@
+[project]
+name = "nasm-assessment"
+version = "0.1.0"
+description = "NASM Overhead Squat Assessment using Bayesian inference with PyMC"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pymc>=5.10",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+    "openpyxl>=3.1",
+    "arviz>=0.17",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+nasm-assess = "src.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

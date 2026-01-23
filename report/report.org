@@ -1,0 +1,436 @@
+#+TITLE: NASM 오버헤드 스쿼트 평가 보고서
+#+AUTHOR: NASM Assessment System
+#+DATE: {{{time(%Y-%m-%d)}}}
+#+OPTIONS: toc:2 num:t
+#+LATEX_CLASS: article
+#+LATEX_HEADER: \usepackage{graphicx}
+#+LATEX_HEADER: \usepackage{booktabs}
+#+LATEX_HEADER: \usepackage{kotex}
+
+* 서론
+
+본 보고서는 3D 모션 캡처 데이터를 활용한 NASM(National Academy of Sports Medicine) 오버헤드 스쿼트 평가 결과를 제시합니다.
+
+** 방법론
+
+본 분석은 다음과 같은 핵심 기법을 적용합니다:
+
+1. *전처리 파이프라인*:
+   - MAD(Median Absolute Deviation) 기반 스파이크 감지
+   - 스파이크 구간 선형 보간
+   - Butterworth 저역통과 필터 (기본 3Hz, 고노이즈 2Hz)
+
+2. *통합 최적화 (Unified Optimization)*:
+   - PyTorch 기반 경사하강법 (Adam optimizer)
+   - 다중 손실 함수 동시 최적화
+   - 적응형 신뢰도 가중치 (Adaptive Confidence)
+   - NaN 복구 메커니즘
+
+3. *손실 함수*:
+   - 데이터 피팅 손실 (원본과의 거리)
+   - 뼈 길이 제약 손실
+   - ROM (Range of Motion) 제약 손실
+   - 가속도 평활화 손실
+   - 떨림(Tremor) 억제 손실
+   - 방향 일관성 손실
+   - 척추 정렬 손실 (머리-몸통-허리 일관성)
+
+4. *스쿼트 사이클 감지*: 피크 감지 알고리즘으로 개별 스쿼트 동작을 식별
+
+* 데이터 개요
+
+| 피험자 | 총 프레임 | 유효 프레임 | 유효율 | 스쿼트 사이클 | 프리셋     |
+|--------+----------+------------+--------+--------------+------------|
+|      1 |      447 |        251 |  56.2% |            5 | default    |
+|      2 |      261 |        200 |  76.6% |            5 | default    |
+|      3 |      309 |        251 |  81.2% |            5 | default    |
+|      4 |      309 |        251 |  81.2% |            5 | high-noise |
+|      5 |      418 |        N/A |    N/A |            5 | high-noise |
+
+** 좌표계
+
+모든 피험자의 데이터는 동일한 좌표계를 사용합니다:
+- *수직축 (vertical)*: Y축 (상하 방향)
+- *측면축 (lateral)*: X축 (좌우 방향)
+- *전방축 (anterior)*: Z축 (앞뒤 방향)
+
+** 프리셋 설정
+
+| 프리셋     | 저역통과 필터 | 대상                        |
+|------------+--------------+-----------------------------|
+| default    | 3.0 Hz       | 일반 데이터 (Subject 1-3)    |
+| high-noise | 2.0 Hz       | 고노이즈 데이터 (Subject 4-5) |
+
+* 분석 결과
+
+** 피험자별 요약
+
+*** Subject 1
+
+**** 필터링 품질
+| 지표           | 값      |
+|----------------+---------|
+| RMSE           | 13.3 mm |
+| 뼈 길이 표준편차 | 0.13 mm |
+| 가속도 개선     | 7.2x    |
+| 반복 횟수       | 4,049   |
+
+**** 무릎 내전 (Knee Valgus)
+
+| 측정 | 왼쪽 무릎 | 표준편차 | 오른쪽 무릎 | 표준편차 |
+|------+----------+---------+------------+---------|
+| 최대 | 1.9°     | ±1.0°   | 3.7°       | ±0.6°   |
+| 최소 | -8.7°    | ±0.5°   | -4.7°      | ±0.5°   |
+
+**** 자세 (Posture)
+
+| 측정 | 허리 휘어짐 | 표준편차 | 상체 숙여짐 | 표준편차 |
+|------+------------+---------+------------+---------|
+| 최대 | 64.9°      | ±25.5°  | -0.6°      | ±0.4°   |
+| 최소 | 0.3°       | ±0.2°   | -17.7°     | ±0.9°   |
+
+#+CAPTION: Subject 1 무릎 내전 분석
+[[../output/assessment/subject_1/knee_valgus.png]]
+
+#+CAPTION: Subject 1 자세 분석
+[[../output/assessment/subject_1/posture.png]]
+
+*** Subject 2
+
+**** 필터링 품질
+| 지표           | 값      |
+|----------------+---------|
+| RMSE           | 8.5 mm  |
+| 뼈 길이 표준편차 | 0.10 mm |
+| 가속도 개선     | 7.3x    |
+| 반복 횟수       | 4,139   |
+
+**** 무릎 내전 (Knee Valgus)
+
+| 측정 | 왼쪽 무릎 | 표준편차 | 오른쪽 무릎 | 표준편차 |
+|------+----------+---------+------------+---------|
+| 최대 | 0.4°     | ±0.4°   | 0.7°       | ±0.9°   |
+| 최소 | -14.9°   | ±0.3°   | -13.0°     | ±0.2°   |
+
+**** 자세 (Posture)
+
+| 측정 | 허리 휘어짐 | 표준편차 | 상체 숙여짐 | 표준편차 |
+|------+------------+---------+------------+---------|
+| 최대 | 85.7°      | ±16.4°  | -4.3°      | ±0.7°   |
+| 최소 | 5.8°       | ±2.3°   | -15.5°     | ±0.3°   |
+
+#+CAPTION: Subject 2 무릎 내전 분석
+[[../output/assessment/subject_2/knee_valgus.png]]
+
+#+CAPTION: Subject 2 자세 분석
+[[../output/assessment/subject_2/posture.png]]
+
+*** Subject 3
+
+**** 필터링 품질
+| 지표           | 값      |
+|----------------+---------|
+| RMSE           | 15.2 mm |
+| 뼈 길이 표준편차 | 0.14 mm |
+| 가속도 개선     | 7.3x    |
+| 반복 횟수       | 4,089   |
+
+**** 무릎 내전 (Knee Valgus)
+
+| 측정 | 왼쪽 무릎 | 표준편차 | 오른쪽 무릎 | 표준편차 |
+|------+----------+---------+------------+---------|
+| 최대 | 2.5°     | ±1.6°   | 1.8°       | ±1.4°   |
+| 최소 | -4.6°    | ±0.8°   | -2.4°      | ±0.4°   |
+
+**** 자세 (Posture)
+
+| 측정 | 허리 휘어짐 | 표준편차 | 상체 숙여짐 | 표준편차 |
+|------+------------+---------+------------+---------|
+| 최대 | 58.1°      | ±24.5°  | -9.5°      | ±2.0°   |
+| 최소 | 0.1°       | ±0.1°   | -16.5°     | ±2.0°   |
+
+#+CAPTION: Subject 3 무릎 내전 분석
+[[../output/assessment/subject_3/knee_valgus.png]]
+
+#+CAPTION: Subject 3 자세 분석
+[[../output/assessment/subject_3/posture.png]]
+
+*** Subject 4
+
+**** 필터링 품질
+| 지표           | 값         |
+|----------------+------------|
+| RMSE           | 42.9 mm    |
+| 뼈 길이 표준편차 | 0.11 mm    |
+| 가속도 개선     | 11.4x      |
+| 반복 횟수       | 3,839      |
+| 프리셋         | high-noise |
+
+*주의*: Subject 4는 RMSE가 높아 데이터 품질이 상대적으로 낮습니다.
+
+**** 무릎 내전 (Knee Valgus)
+
+| 측정 | 왼쪽 무릎    | 표준편차   | 오른쪽 무릎   | 표준편차   |
+|------|-------------|-----------|--------------|-----------|
+| 최대 | 5.5°        | ±1.7°     | 9.5°         | ±1.6°     |
+| 최소 | -7.7°       | ±0.7°     | -6.9°        | ±0.9°     |
+
+**** 자세 (Posture)
+
+| 측정 | 허리 휘어짐 | 표준편차 | 상체 숙여짐 | 표준편차 |
+|------+------------+---------+------------+---------|
+| 최대 | 119.9°     | ±56.5°  | -7.7°      | ±7.6°   |
+| 최소 | 0.2°       | ±0.1°   | -43.0°     | ±9.0°   |
+
+#+CAPTION: Subject 4 무릎 내전 분석
+[[../output/assessment/subject_4/knee_valgus.png]]
+
+#+CAPTION: Subject 4 자세 분석
+[[../output/assessment/subject_4/posture.png]]
+
+*** Subject 5
+
+**** 필터링 품질
+| 지표           | 값         |
+|----------------+------------|
+| 뼈 길이 표준편차 | 0.11 mm    |
+| 반복 횟수       | 3,170      |
+| 프리셋         | high-noise |
+
+**** 무릎 내전 (Knee Valgus)
+
+| 측정 | 왼쪽 무릎 | 표준편차 | 오른쪽 무릎 | 표준편차 |
+|------+----------+---------+------------+---------|
+| 최대 | 6.4°     | ±1.0°   | 1.7°       | ±0.5°   |
+| 최소 | -2.5°    | ±0.8°   | -7.3°      | ±1.2°   |
+
+**** 자세 (Posture)
+
+| 측정 | 허리 휘어짐 | 표준편차 | 상체 숙여짐 | 표준편차 |
+|------+------------+---------+------------+---------|
+| 최대 | 59.0°      | ±16.2°  | -16.4°     | ±1.8°   |
+| 최소 | 0.4°       | ±0.3°   | -27.5°     | ±0.8°   |
+
+#+CAPTION: Subject 5 무릎 내전 분석
+[[../output/assessment/subject_5/knee_valgus.png]]
+
+#+CAPTION: Subject 5 자세 분석
+[[../output/assessment/subject_5/posture.png]]
+
+* 전체 요약 표
+
+** 무릎 내전 요약
+
+| 피험자 | 왼쪽 최대 | 왼쪽 최소 | 오른쪽 최대 | 오른쪽 최소 |
+|--------+----------+----------+------------+------------|
+|      1 | 1.9°     | -8.7°    | 3.7°       | -4.7°      |
+|      2 | 0.4°     | -14.9°   | 0.7°       | -13.0°     |
+|      3 | 2.5°     | -4.6°    | 1.8°       | -2.4°      |
+|      4 | 5.5°     | -7.7°    | 9.5°       | -6.9°      |
+|      5 | 6.4°     | -2.5°    | 1.7°       | -7.3°      |
+
+*양수(+)*: 무릎이 안쪽으로 (내전, valgus)
+*음수(-)*: 무릎이 바깥쪽으로 (외전, varus)
+
+** 자세 요약
+
+| 피험자 | 허리 휘어짐 최대 | 허리 휘어짐 최소 | 상체 숙여짐 최대 | 상체 숙여짐 최소 |
+|--------+----------------+----------------+----------------+----------------|
+|      1 | 64.9°          | 0.3°           | -0.6°          | -17.7°         |
+|      2 | 85.7°          | 5.8°           | -4.3°          | -15.5°         |
+|      3 | 58.1°          | 0.1°           | -9.5°          | -16.5°         |
+|      4 | 119.9°         | 0.2°           | -7.7°          | -43.0°         |
+|      5 | 59.0°          | 0.4°           | -16.4°         | -27.5°         |
+
+* 알고리즘 문서
+
+** 통합 최적화 (Unified Optimization)
+
+PyTorch 기반 경사하강법으로 다중 손실 함수를 동시에 최적화합니다.
+
+*** 손실 함수
+
+\begin{equation}
+\mathcal{L}_{total} = w_{data} \mathcal{L}_{data} + w_{bone} \mathcal{L}_{bone} + w_{rom} \mathcal{L}_{rom} + w_{accel} \mathcal{L}_{accel} + w_{jerk} \mathcal{L}_{jerk} + w_{tremor} \mathcal{L}_{tremor} + w_{dir} \mathcal{L}_{dir} + w_{spine} \mathcal{L}_{spine}
+\end{equation}
+
+| 손실 함수               | 가중치 | 설명                        |
+|------------------------+--------+-----------------------------|
+| $\mathcal{L}_{data}$   |    1.0 | 원본 데이터와의 거리          |
+| $\mathcal{L}_{bone}$   |  100.0 | 뼈 길이 일정성 제약           |
+| $\mathcal{L}_{rom}$    |   50.0 | 관절 각도 범위 제약           |
+| $\mathcal{L}_{accel}$  |   10.0 | 가속도 평활화                |
+| $\mathcal{L}_{jerk}$   |    5.0 | 저크(가속도 미분) 평활화      |
+| $\mathcal{L}_{tremor}$ |   20.0 | 이동평균 대비 편차 억제       |
+| $\mathcal{L}_{dir}$    |   15.0 | 속도 방향 일관성              |
+| $\mathcal{L}_{spine}$  |  200.0 | 척추 정렬 일관성 (머리-허리)   |
+
+*** 데이터 손실 (Data Loss)
+
+\begin{equation}
+\mathcal{L}_{data} = \frac{1}{N} \sum_{t=1}^{N} c_t \|x_t - \hat{x}_t\|^2
+\end{equation}
+
+여기서 $c_t$는 적응형 신뢰도 가중치입니다.
+
+*** 뼈 길이 손실 (Bone Loss)
+
+\begin{equation}
+\mathcal{L}_{bone} = \sum_{(i,j) \in \text{bones}} \left(\|x_i - x_j\| - L_{ij}\right)^2
+\end{equation}
+
+*** 떨림 억제 손실 (Tremor Loss)
+
+\begin{equation}
+\mathcal{L}_{tremor} = \sum_t \|x_t - \bar{x}_t\|^2
+\end{equation}
+
+여기서 $\bar{x}_t$는 윈도우 크기 5의 이동평균입니다.
+
+*** 방향 일관성 손실 (Direction Loss)
+
+\begin{equation}
+\mathcal{L}_{dir} = \sum_t \text{ReLU}(-\cos(v_t, v_{t+1}))^2
+\end{equation}
+
+연속 프레임 간 속도 방향이 반대로 바뀌면 페널티를 부여합니다.
+
+*** 척추 정렬 손실 (Spine Alignment Loss)
+
+\begin{equation}
+\mathcal{L}_{spine} = \mathcal{L}_{neck} + 10 \mathcal{L}_{torso\_dir} + 50 \mathcal{L}_{lean}
+\end{equation}
+
+머리-몸통-허리의 움직임 일관성을 유지하기 위한 손실 함수입니다:
+
+1. *목 각도 속도 제약* ($\mathcal{L}_{neck}$): 머리-몸통-허리 각도의 급격한 변화 억제
+2. *토르소 방향 일관성* ($\mathcal{L}_{torso\_dir}$): 머리-허리 3D 벡터의 방향 변화 억제
+3. *토르소 lean 속도 제약* ($\mathcal{L}_{lean}$): 시상면에서의 상체 기울기 급변 억제
+
+*효과 (Subject 4)*:
+- Torso Lean Std: 14.7° → 11.0° (25% 개선)
+- Torso Lean Velocity Max: 3.81°/frame → 1.67°/frame (56% 개선)
+
+** 적응형 신뢰도 (Adaptive Confidence)
+
+각 프레임의 데이터 품질을 평가하여 신뢰도 가중치를 동적으로 조정합니다:
+
+1. 초기 신뢰도: 유효 프레임 = 1.0, 스파이크/NaN 프레임 = 0.5
+2. 10 에폭마다 뼈 길이 편차 기반으로 업데이트
+3. 편차가 큰 프레임은 낮은 가중치 부여
+
+** NaN 복구 메커니즘
+
+최적화 중 NaN이 발생하면:
+1. 최적 상태로 롤백
+2. 학습률 50% 감소
+3. 작은 노이즈 추가로 국소 최소점 탈출
+4. 옵티마이저 재초기화
+5. 최대 5회 복구 시도
+
+** 전처리 파이프라인
+
+*** 스파이크 감지 (MAD 기반)
+
+\begin{equation}
+\text{spike} = |x - \text{median}(x)| > k \cdot 1.4826 \cdot \text{MAD}
+\end{equation}
+
+여기서 $k=3.0$ (임계값), MAD = Median Absolute Deviation
+
+*** Butterworth 저역통과 필터
+
+- 기본 (default): 3.0 Hz
+- 고노이즈 (high-noise): 2.0 Hz
+- 필터 차수: 2
+- 영위상 필터링 (filtfilt)
+
+** 무릎 내전 계산 (정면 평면)
+
+정면에서 봤을 때 엉덩이-발목 직선을 기준으로 무릎의 편차를 측정합니다:
+
+\begin{equation}
+\theta = \arctan2(\text{perpendicular}, \text{parallel})
+\end{equation}
+
+- *양수 (+)*: 무릎이 안쪽으로 (내전, valgus)
+- *음수 (-)*: 무릎이 바깥쪽으로 (외전, varus)
+
+** 허리 휘어짐 vs 상체 숙여짐
+
+| 항목      | 허리 휘어짐 (Back Arch)  | 상체 숙여짐 (Torso Lean) |
+|-----------+-------------------------+-------------------------|
+| 측정 대상  | 척추의 휘어짐 정도        | 상체의 기울기            |
+| 기준      | 상체-허리-엉덩이 내부 각도 | 수직선 대비 상체 각도     |
+| 0°의 의미 | 척추가 완전히 직선        | 상체가 완전히 수직        |
+| 양수 (+)  | 휘어짐 발생              | 뒤로 기울어짐            |
+| 음수 (-)  | (해당 없음)              | 앞으로 기울어짐           |
+
+** 스쿼트 사이클 감지
+
+scipy의 =find_peaks= 함수를 사용하여 엉덩이 중심의 수직 위치에서 피크를 감지합니다:
+
+- *min_depth*: 최소 100mm 이상의 수직 이동을 스쿼트로 인식
+- *min_distance*: 최소 30프레임 간격 유지
+
+* 결론
+
+본 분석을 통해 다음을 제공합니다:
+
+1. 통합 최적화 기반 노이즈 필터링된 스켈레톤 궤적
+2. NASM 기준에 따른 평가:
+   - 무릎 내전/외전 (양쪽)
+   - 허리 휘어짐 (요추 전만)
+   - 상체 숙여짐
+3. 스쿼트 사이클별 통계
+4. 필터링 품질 지표 (RMSE, 뼈 길이 표준편차, 가속도 개선)
+
+** 데이터 품질 참고사항
+
+- *Subject 1-3*: default 프리셋 사용, RMSE 8-15mm로 양호
+- *Subject 4*: high-noise 프리셋 사용, RMSE 42.9mm로 높음
+- *Subject 5*: high-noise 프리셋 사용
+
+** 출력 파일 구조
+
+#+begin_example
+output/assessment/
+├── subject_1/
+│   ├── assessment.csv         # 필터링된 위치 + 평가 각도
+│   ├── original.csv           # 원본 위치
+│   ├── filtered.csv           # 필터링된 위치
+│   ├── filtered.bones.csv     # 뼈 길이
+│   ├── coord.csv              # 좌표계
+│   ├── knee_valgus.png        # 무릎 평가 그래프
+│   ├── posture.png            # 자세 평가 그래프
+│   └── skeleton_comparison.gif # 애니메이션
+├── subject_2/
+│   └── ...
+├── subject_3/
+├── subject_4/
+└── subject_5/
+#+end_example
+
+** assessment.csv 컬럼
+
+| 컬럼명                | 설명                          |
+|-----------------------+-------------------------------|
+| frame                 | 프레임 번호                    |
+| {joint}_x, _y, _z     | 15개 관절의 필터링된 좌표 (45개) |
+| left_knee_valgus_deg  | 왼쪽 무릎 외반/내반 각도        |
+| right_knee_valgus_deg | 오른쪽 무릎 외반/내반 각도       |
+| back_arch_deg         | 허리 휘어짐 각도                |
+| torso_lean_deg        | 상체 숙임 각도                 |
+
+** 실행 방법
+
+#+begin_src bash
+# 기본 실행 (Subject 1-3 with default preset)
+uv run python -m src.main --subjects 1 2 3 --preset default --output-dir output/assessment
+
+# 고노이즈 데이터 (Subject 4-5 with high-noise preset)
+uv run python -m src.main --subjects 4 5 --preset high-noise --output-dir output/assessment
+
+# 애니메이션 생성 (캐시된 결과 사용)
+uv run python -m src.main --subjects 1 2 3 4 5 --animation-only --output-dir output/assessment
+#+end_src
