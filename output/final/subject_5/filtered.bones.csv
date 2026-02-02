@@ -1,0 +1,15 @@
+parent,child,length
+head,torso,488.2198704029859
+torso,waist,211.349709999397
+torso,l_shoulder,308.40644982629817
+torso,r_shoulder,309.7857254535472
+l_shoulder,l_elbow,276.14416369065054
+l_elbow,l_wrist,261.1218815527847
+r_shoulder,r_elbow,278.39305909874764
+r_elbow,r_wrist,263.3811590969498
+waist,l_hip,164.22498685110872
+waist,r_hip,161.4123608504925
+l_hip,l_knee,435.2171605764396
+l_knee,l_ankle,346.064701593227
+r_hip,r_knee,434.5024790736271
+r_knee,r_ankle,336.9752169371791
