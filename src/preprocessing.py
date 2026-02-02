@@ -133,40 +133,6 @@ def compute_velocity(positions: np.ndarray) -> np.ndarray:
     return velocity
 
 
-def clamp_velocity(
-    positions: np.ndarray, max_velocity: float, iterations: int = 3
-) -> np.ndarray:
-    """
-    Iteratively clamp unrealistic velocities.
-
-    Args:
-        positions: (n_frames, 3) array
-        max_velocity: Maximum allowed velocity per frame (mm/frame)
-        iterations: Number of clamping passes
-
-    Returns:
-        Velocity-clamped positions
-    """
-    result = positions.copy()
-
-    for _ in range(iterations):
-        velocity = result[1:] - result[:-1]
-        speed = np.linalg.norm(velocity, axis=1)
-        excessive = speed > max_velocity
-
-        if not np.any(excessive):
-            break
-
-        # Scale down excessive velocities
-        scale = np.where(excessive, max_velocity / (speed + 1e-8), 1.0)
-        velocity = velocity * scale[:, np.newaxis]
-
-        # Reconstruct positions
-        result[1:] = result[0] + np.cumsum(velocity, axis=0)
-
-    return result
-
-
 def preprocess(
     positions: np.ndarray,
     bones: list[tuple[str, str]],
@@ -272,12 +238,31 @@ def preprocess(
     )
 
 
+@dataclass
+class FilteredResultAdapter:
+    """
+    Adapter to make unified filter output compatible with assessment functions.
+
+    Provides the same interface (positions dict, positions_std dict) that
+    assessment functions expect.
+    """
+
+    # Joint positions: joint_name -> (N, 3)
+    positions: dict[str, np.ndarray]
+
+    # Optional uncertainty (not used in unified optimizer, but required by interface)
+    positions_std: dict[str, np.ndarray] | None = None
+
+    # Reference bone lengths
+    bone_lengths: dict[tuple[str, str], float] | None = None
+
+
 def skeleton_to_array(skeleton) -> np.ndarray:
     """
     Convert SkeletonSequence to numpy array.
 
     Args:
-        skeleton: SkeletonSequence object from src_old.data_loader
+        skeleton: SkeletonSequence object from src.data_loader
 
     Returns:
         (n_frames, n_joints, 3) array
@@ -303,7 +288,7 @@ def array_to_skeleton(positions: np.ndarray, original_skeleton):
     Returns:
         New SkeletonSequence with updated positions
     """
-    from src_old.data_loader import SkeletonSequence, Joint
+    from .data_loader import SkeletonSequence, Joint
 
     joints = {}
     for i, joint_name in enumerate(JOINT_NAMES):
@@ -336,24 +321,6 @@ def skeleton_to_positions_dict(skeleton) -> dict[str, np.ndarray]:
     }
 
 
-@dataclass
-class FilteredResultAdapter:
-    """
-    Adapter to make unified filter output compatible with existing assessment functions.
-
-    Mimics the interface of src.models.fast_filter.FilteredResult.
-    """
-
-    # Joint positions: joint_name -> (N, 3)
-    positions: dict[str, np.ndarray]
-
-    # Optional uncertainty (not used in v2, but required by interface)
-    positions_std: dict[str, np.ndarray] | None = None
-
-    # Reference bone lengths
-    bone_lengths: dict[tuple[str, str], float] | None = None
-
-
 def create_filtered_result_adapter(skeleton, bone_lengths=None) -> FilteredResultAdapter:
     """
     Create a FilteredResultAdapter from a SkeletonSequence.
@@ -371,3 +338,5 @@ def create_filtered_result_adapter(skeleton, bone_lengths=None) -> FilteredResul
         positions_std=None,
         bone_lengths=bone_lengths,
     )
+
+

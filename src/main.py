@@ -7,31 +7,23 @@ Usage:
 """
 
 import argparse
-from pathlib import Path
-import sys
 import csv
+from pathlib import Path
 
 import numpy as np
 
-# Add parent directory to path for src_old imports (legacy code)
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src_old.data_loader import load_all_subjects, infer_coordinate_system
-from src_old.analysis.cycle_detection import detect_squat_cycles, analyze_cycles
-from src_old.assessment.knee_valgus import assess_knee_valgus
-from src_old.assessment.posture import assess_posture
-from src_old.visualization import (
-    plot_knee_valgus_assessment,
-    plot_posture_assessment,
-)
+from .data_loader import load_all_subjects, infer_coordinate_system
+from .cycle_detection import detect_squat_cycles, analyze_cycles
+from .assessment.knee_valgus import assess_knee_valgus
+from .assessment.posture import assess_posture
+from .visualization import plot_knee_valgus_assessment, plot_posture_assessment
 from .fast_animation import (
     create_fast_animation,
     save_cached_result,
     load_cached_result,
-    has_cached_result,
     CachedResult,
 )
-from .config import get_preset_config, BONES
+from .config import get_preset_config, BONES, JOINT_NAMES
 from .preprocessing import (
     skeleton_to_array,
     array_to_skeleton,
@@ -58,8 +50,6 @@ def export_assessment_csv(
         posture_result: PostureResult from assessment
         coord_system: Coordinate system mapping
     """
-    from .config import JOINT_NAMES
-
     n_frames = filtered_positions.shape[0]
 
     # Build header
@@ -276,9 +266,6 @@ def main():
         print("\nApplying unified filter...")
         result = unified_filter(original_positions, config=config)
 
-        # Convert back to skeleton
-        filtered_skeleton = array_to_skeleton(result.positions, skeleton)
-
         # Save cached results (unless --no-cache)
         if not args.no_cache:
             cached = CachedResult(
@@ -304,6 +291,9 @@ def main():
         print(f"  Bone length std: {metrics['bone_length_std_mm']:.2f} mm")
         print(f"  Acceleration improvement: {metrics['acceleration_improvement']:.1f}x")
 
+        # Convert back to skeleton for assessment
+        filtered_skeleton = array_to_skeleton(result.positions, skeleton)
+
         # Detect squat cycles
         print("\nDetecting squat cycles...")
         axis_map = {"x": 0, "y": 1, "z": 2}
@@ -314,62 +304,60 @@ def main():
 
         if len(cycles) == 0:
             print("  Warning: No squat cycles detected, skipping assessment")
-            continue
+        else:
+            for i, cycle in enumerate(cycles):
+                print(f"    Cycle {i+1}: frames {cycle.start_frame}-{cycle.end_frame}, depth {cycle.depth:.1f}mm")
 
-        for i, cycle in enumerate(cycles):
-            print(f"    Cycle {i+1}: frames {cycle.start_frame}-{cycle.end_frame}, depth {cycle.depth:.1f}mm")
+            # Run assessments
+            print("Running assessments...")
+            filtered_adapter = create_filtered_result_adapter(
+                filtered_skeleton, bone_lengths=result.bone_lengths
+            )
+            knee_result = assess_knee_valgus(filtered_adapter, coord_system)
+            posture_result = assess_posture(filtered_adapter, coord_system)
 
-        # Run assessments
-        print("Running assessments...")
-        filtered_adapter = create_filtered_result_adapter(
-            filtered_skeleton, bone_lengths=result.bone_lengths
-        )
-        knee_result = assess_knee_valgus(filtered_adapter, coord_system)
-        posture_result = assess_posture(filtered_adapter, coord_system)
+            # Analyze per-cycle statistics
+            left_knee_analysis = analyze_cycles(cycles, knee_result.left_angle)
+            right_knee_analysis = analyze_cycles(cycles, knee_result.right_angle)
+            back_arch_analysis = analyze_cycles(cycles, posture_result.back_arch_angle)
+            torso_lean_analysis = analyze_cycles(cycles, posture_result.torso_lean_angle)
 
-        # Analyze per-cycle statistics
-        left_knee_analysis = analyze_cycles(cycles, knee_result.left_angle)
-        right_knee_analysis = analyze_cycles(cycles, knee_result.right_angle)
-        back_arch_analysis = analyze_cycles(cycles, posture_result.back_arch_angle)
-        torso_lean_analysis = analyze_cycles(cycles, posture_result.torso_lean_angle)
+            # Print assessment results
+            print(f"\n  Knee Valgus (positive=inward, negative=outward)")
+            if left_knee_analysis.get("aggregate"):
+                agg = left_knee_analysis["aggregate"]
+                print(f"    Left:  max {agg['max_angle_mean']:7.1f} (+/- {agg['max_angle_std']:.1f})")
+                print(f"           min {agg['min_angle_mean']:7.1f} (+/- {agg['min_angle_std']:.1f})")
+            if right_knee_analysis.get("aggregate"):
+                agg = right_knee_analysis["aggregate"]
+                print(f"    Right: max {agg['max_angle_mean']:7.1f} (+/- {agg['max_angle_std']:.1f})")
+                print(f"           min {agg['min_angle_mean']:7.1f} (+/- {agg['min_angle_std']:.1f})")
 
-        # Print assessment results
-        print(f"\n  ▶ Knee Valgus (positive=inward, negative=outward)")
-        ci_width = 3.0  # Approximate CI width for display
-        if left_knee_analysis.get("aggregate"):
-            agg = left_knee_analysis["aggregate"]
-            print(f"    Left:  max {agg['max_angle_mean']:7.1f}° (+/- {agg['max_angle_std']:.1f}°)")
-            print(f"           min {agg['min_angle_mean']:7.1f}° (+/- {agg['min_angle_std']:.1f}°)")
-        if right_knee_analysis.get("aggregate"):
-            agg = right_knee_analysis["aggregate"]
-            print(f"    Right: max {agg['max_angle_mean']:7.1f}° (+/- {agg['max_angle_std']:.1f}°)")
-            print(f"           min {agg['min_angle_mean']:7.1f}° (+/- {agg['min_angle_std']:.1f}°)")
+            if back_arch_analysis.get("aggregate"):
+                agg_ba = back_arch_analysis["aggregate"]
+                agg_tl = torso_lean_analysis.get("aggregate")
+                print(f"\n  Posture (Lateral View)")
+                print(f"    Back Arch:  max {agg_ba['max_angle_mean']:7.1f} (+/- {agg_ba['max_angle_std']:.1f})")
+                print(f"                min {agg_ba['min_angle_mean']:7.1f} (+/- {agg_ba['min_angle_std']:.1f})")
+                if agg_tl:
+                    print(f"    Torso Lean: max {agg_tl['max_angle_mean']:7.1f} (+/- {agg_tl['max_angle_std']:.1f})")
+                    print(f"                min {agg_tl['min_angle_mean']:7.1f} (+/- {agg_tl['min_angle_std']:.1f})")
 
-        if back_arch_analysis.get("aggregate"):
-            agg_ba = back_arch_analysis["aggregate"]
-            agg_tl = torso_lean_analysis.get("aggregate")
-            print(f"\n  ▶ Posture (Lateral View)")
-            print(f"    Back Arch:  max {agg_ba['max_angle_mean']:7.1f}° (+/- {agg_ba['max_angle_std']:.1f}°)")
-            print(f"                min {agg_ba['min_angle_mean']:7.1f}° (+/- {agg_ba['min_angle_std']:.1f}°)")
-            if agg_tl:
-                print(f"    Torso Lean: max {agg_tl['max_angle_mean']:7.1f}° (+/- {agg_tl['max_angle_std']:.1f}°)")
-                print(f"                min {agg_tl['min_angle_mean']:7.1f}° (+/- {agg_tl['min_angle_std']:.1f}°)")
+            # Create visualizations
+            print("\nGenerating visualizations...")
+            plot_knee_valgus_assessment(knee_result, subject_output / "knee_valgus.png")
+            plot_posture_assessment(posture_result, subject_output / "posture.png")
 
-        # Create visualizations
-        print("\nGenerating visualizations...")
-        plot_knee_valgus_assessment(knee_result, subject_output / "knee_valgus.png")
-        plot_posture_assessment(posture_result, subject_output / "posture.png")
-
-        # Export assessment CSV to subject folder
-        assessment_csv_path = subject_output / "assessment.csv"
-        export_assessment_csv(
-            assessment_csv_path,
-            result.positions,
-            knee_result,
-            posture_result,
-            coord_system,
-        )
-        print(f"  Assessment CSV saved to: {assessment_csv_path}")
+            # Export assessment CSV
+            assessment_csv_path = subject_output / "assessment.csv"
+            export_assessment_csv(
+                assessment_csv_path,
+                result.positions,
+                knee_result,
+                posture_result,
+                coord_system,
+            )
+            print(f"  Assessment CSV saved to: {assessment_csv_path}")
 
         # Animation (if requested)
         if args.animation:

@@ -209,6 +209,7 @@ class TestUnifiedLoss:
             + weights.velocity * breakdown["velocity"]
             + weights.tremor * breakdown["tremor"]
             + weights.direction * breakdown["direction"]
+            + weights.spine * breakdown["spine"]
         )
 
         assert breakdown["total"] == pytest.approx(expected, rel=1e-4)

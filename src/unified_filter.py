@@ -134,12 +134,30 @@ def compute_metrics(
 
     metrics = {}
 
-    # RMSE (overall deviation from original)
-    diff = filtered - original
+    # Find valid frames (frames without NaN in original data)
+    valid_mask = ~np.isnan(original).any(axis=(1, 2))
+    n_valid = valid_mask.sum()
+    metrics["valid_frames"] = int(n_valid)
+    metrics["total_frames"] = len(original)
+
+    if n_valid == 0:
+        # No valid frames, return NaN for all metrics
+        metrics["rmse_mm"] = float("nan")
+        metrics["bone_length_std_mm"] = float("nan")
+        metrics["acceleration_mean"] = float("nan")
+        metrics["acceleration_improvement"] = float("nan")
+        return metrics
+
+    # Use only valid frames for RMSE calculation
+    orig_valid = original[valid_mask]
+    filt_valid = filtered[valid_mask]
+
+    # RMSE (overall deviation from original, using valid frames only)
+    diff = filt_valid - orig_valid
     rmse = np.sqrt(np.mean(diff ** 2))
     metrics["rmse_mm"] = rmse
 
-    # Bone length consistency (std of bone lengths over time)
+    # Bone length consistency (std of bone lengths over time, using all filtered data)
     bone_std_total = 0.0
     for (parent, child), ref_length in bone_lengths.items():
         p_idx = JOINT_INDEX[parent]
@@ -148,14 +166,34 @@ def compute_metrics(
         bone_std_total += np.std(lengths)
     metrics["bone_length_std_mm"] = bone_std_total / len(bone_lengths)
 
-    # Smoothness (mean acceleration magnitude)
+    # Smoothness (mean acceleration magnitude of filtered data)
     accel = filtered[2:] - 2 * filtered[1:-1] + filtered[:-2]
     accel_mag = np.linalg.norm(accel, axis=2).mean()
     metrics["acceleration_mean"] = accel_mag
 
-    # Original smoothness for comparison
-    orig_accel = original[2:] - 2 * original[1:-1] + original[:-2]
-    orig_accel_mag = np.linalg.norm(orig_accel, axis=2).mean()
-    metrics["acceleration_improvement"] = orig_accel_mag / (accel_mag + 1e-8)
+    # Original smoothness for comparison (using valid frames only)
+    # Find consecutive valid frame triplets for acceleration calculation
+    valid_indices = np.where(valid_mask)[0]
+    if len(valid_indices) >= 3:
+        # Find triplets where all three consecutive frames are valid
+        triplet_mask = np.zeros(len(original) - 2, dtype=bool)
+        for i in range(len(original) - 2):
+            if valid_mask[i] and valid_mask[i + 1] and valid_mask[i + 2]:
+                triplet_mask[i] = True
+
+        if triplet_mask.sum() > 0:
+            orig_accel = original[2:] - 2 * original[1:-1] + original[:-2]
+            orig_accel_valid = orig_accel[triplet_mask]
+            orig_accel_mag = np.linalg.norm(orig_accel_valid, axis=2).mean()
+
+            # For fair comparison, use same frames for filtered acceleration
+            filt_accel_valid = accel[triplet_mask]
+            filt_accel_mag = np.linalg.norm(filt_accel_valid, axis=2).mean()
+
+            metrics["acceleration_improvement"] = orig_accel_mag / (filt_accel_mag + 1e-8)
+        else:
+            metrics["acceleration_improvement"] = float("nan")
+    else:
+        metrics["acceleration_improvement"] = float("nan")
 
     return metrics
