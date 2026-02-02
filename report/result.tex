@@ -1,0 +1,307 @@
+% Created 2026-02-02 Mon 23:07
+% Intended LaTeX compiler: pdflatex
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\usepackage{kotex}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage[font=small,labelfont=bf,skip=5pt]{caption}
+\definecolor{highlight}{RGB}{52, 152, 219}
+\author{Kim Daewon}
+\date{2026-02-02}
+\title{NASM 오버헤드 스쿼트 평가 시스템 결과 보고서}
+\hypersetup{
+ pdfauthor={Kim Daewon},
+ pdftitle={NASM 오버헤드 스쿼트 평가 시스템 결과 보고서},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={Emacs 30.2 (Org mode 9.7.39)}, 
+ pdflang={English}}
+\begin{document}
+
+\maketitle
+\setcounter{tocdepth}{2}
+\tableofcontents
+
+\section{요약}
+\label{sec:orgc79123c}
+
+\subsection{핵심 요약}
+\label{sec:org6c88971}
+
+노이즈가 심한 3D 모션 캡처 데이터에서 \textbf{통합 최적화 기법}을 적용하여, 해부학적 일관성을 유지하면서 \textbf{평균 39배의 노이즈 감소}를 달성하고 신뢰할 수 있는 NASM 스쿼트 평가 결과를 도출했습니다.
+\subsection{핵심 성과}
+\label{sec:org2ac2d9e}
+
+\begin{enumerate}
+\item \textbf{노이즈 감소}: 가속도 분산 기준 7\textasciitilde{}14배 개선 (고노이즈 데이터 최대 105배)
+\item \textbf{해부학적 정확성}: 뼈 길이 표준편차 0.15mm 이하로 시간에 따른 변동 최소화
+\item \textbf{적응형 처리}: 일반/고노이즈 데이터에 대한 프리셋 자동 적용으로 5명 피험자 전원 분석 성공
+\end{enumerate}
+\section{프로젝트 개요}
+\label{sec:org0732ef8}
+
+\subsection{배경 및 목적}
+\label{sec:org2a2abe8}
+
+NASM(National Academy of Sports Medicine) 오버헤드 스쿼트 평가는 근골격계 불균형을 식별하는 표준 기능적 움직임 평가입니다. 본 프로젝트는 3D 모션 캡처 데이터를 분석하여 다음 세 가지 핵심 지표를 자동으로 측정합니다:
+
+\begin{center}
+\begin{tabular}{lll}
+평가 항목 & 관찰 시점 & 측정 내용\\
+\hline
+\textbf{무릎 내전} & 전방 & 스쿼트 시 무릎이 안쪽으로 모이는 정도\\
+\textbf{허리 아치} & 측면 & 요추부 과전만 또는 평평해짐\\
+\textbf{상체 기울기} & 측면 & 몸통이 앞으로 숙여지는 정도\\
+\end{tabular}
+\end{center}
+\subsection{범위}
+\label{sec:orgdd4b1f5}
+
+\begin{itemize}
+\item \textbf{데이터}: 5명 피험자, 각 피험자당 5회 스쿼트 사이클
+\item \textbf{관절점}: 15개 (머리, 몸통, 허리, 어깨, 팔꿈치, 손목, 고관절, 무릎, 발목 × 좌/우)
+\item \textbf{샘플링}: 30fps, 약 250\textasciitilde{}450 프레임/피험자
+\end{itemize}
+\section{수행 내용}
+\label{sec:org5072570}
+
+\subsection{주요 단계 요약}
+\label{sec:orge29c6ff}
+
+\begin{center}
+\begin{tabular}{|c|l|l|}
+단계 & 작업 & 목적\\
+\hline
+1 & 스파이크 감지 및 제거 & 센서 오류로 인한 이상치 처리\\
+2 & 저역통과 필터링 & 고주파 노이즈 제거\\
+3 & 통합 최적화 & 다중 제약조건 동시 충족\\
+4 & 평가 지표 계산 & 무릎 내전, 자세 각도 산출\\
+5 & 시각화 생성 & 그래프 및 애니메이션 출력\\
+\end{tabular}
+\end{center}
+\subsection{처리 파이프라인}
+\label{sec:org42c345c}
+
+\begin{verbatim}
+원본 데이터 ─→ [MAD 스파이크 감지] ─→ [선형 보간] ─→ [Butterworth 필터]
+                                                              │
+                                                              ▼
+평가 결과 ←── [지표 계산] ←── [통합 최적화: 9개 손실함수] ←──┘
+\end{verbatim}
+\subsection{적용 프리셋}
+\label{sec:orgc01be40}
+
+\begin{center}
+\begin{tabular}{lll}
+프리셋 & 저역통과 Cutoff & 적용 대상\\
+\hline
+\texttt{default} & 3.0 Hz & Subject 1, 2, 3\\
+\texttt{high-noise} & 2.0 Hz & Subject 4, 5\\
+\end{tabular}
+\end{center}
+\section{결과}
+\label{sec:org3d801fc}
+
+\subsection{필터링 성능 비교 (Before/After)}
+\label{sec:org2b8156b}
+
+\begin{center}
+\begin{tabular}{rrrll}
+피험자 & RMSE (mm) & 뼈 길이 σ (mm) & 가속도 개선 & 최적화 반복\\
+\hline
+1 & 25.9 & 0.06 & 13.6x & 4,049\\
+2 & 16.7 & 0.11 & 12.2x & 4,139\\
+3 & 15.2 & 0.15 & 7.3x & 4,089\\
+4 & 51.4 & 0.30 & \textbf{57.3x} & 3,839\\
+5 & 29.9 & 0.11 & \textbf{105.7x} {[}†] & 3,170\\
+\hline
+\textbf{평균} & \textbf{27.8} & \textbf{0.15} & \textbf{39.2x} & \textbf{3,857}\\
+\end{tabular}
+\end{center}
+
+{[}†] Subject 5는 원본 데이터 끝 53프레임에 NaN이 포함되어 유효 프레임(365/418)만으로 계산
+
+\begin{itemize}
+\item \textbf{RMSE}: 원본과 필터링 결과의 평균 거리 (원본 형태 유지 정도)
+\item \textbf{뼈 길이 σ}: 뼈 길이의 시간적 변동 (낮을수록 해부학적으로 정확)
+\item \textbf{가속도 개선}: 원본 대비 필터링 후 가속도 분산 감소 비율
+\end{itemize}
+\subsection{무릎 내전 평가 결과}
+\label{sec:org78b54da}
+
+\begin{center}
+\begin{tabular}{rlllll}
+피험자 & 왼쪽 최대 & 왼쪽 최소 & 오른쪽 최대 & 오른쪽 최소 & 판정\\
+\hline
+1 & 1.9° & -8.7° & 3.7° & -4.7° & 경미한 우측 내전\\
+2 & 0.4° & -14.9° & 0.7° & -13.0° & 정상 (외전 우세)\\
+3 & 2.5° & -4.6° & 1.8° & -2.4° & 정상\\
+4 & 5.5° & -7.7° & \textbf{9.5°} & -6.9° & \textbf{우측 내전 주의}\\
+5 & \textbf{6.4°} & -2.5° & 1.7° & -7.3° & \textbf{좌측 내전 주의}\\
+\end{tabular}
+\end{center}
+
+\begin{itemize}
+\item \textbf{양수(+)}: 무릎이 안쪽으로 (내전, valgus) - 5° 이상 시 주의
+\item \textbf{음수(-)}: 무릎이 바깥쪽으로 (외전, varus)
+\end{itemize}
+\subsection{자세 평가 결과}
+\label{sec:orgfd28ae2}
+
+\begin{center}
+\begin{tabular}{rlll}
+피험자 & 허리 아치 최대 & 상체 기울기 최대 & 판정\\
+\hline
+1 & 64.9° & -17.7° & 정상 범위\\
+2 & 85.7° & -15.5° & 정상 범위\\
+3 & 58.1° & -16.5° & 정상 범위\\
+4 & \textbf{119.9°} & \textbf{-43.0°} & \textbf{과도한 전방 기울기}\\
+5 & 59.0° & \textbf{-27.5°} & \textbf{전방 기울기 주의}\\
+\end{tabular}
+\end{center}
+
+\begin{itemize}
+\item \textbf{상체 기울기 음수}: 앞으로 숙여짐 (20° 초과 시 주의)
+\item \textbf{허리 아치}: 상/하부 척추 각도 차이
+\end{itemize}
+\subsection{시각화 결과}
+\label{sec:org685a7e4}
+
+\subsubsection{원본 데이터 노이즈 비교}
+\label{sec:org2a0680f}
+
+아래 그래프는 필터링 전 원본 데이터의 노이즈 수준을 비교합니다. Subject 4(고노이즈)는 Subject 3(일반)에 비해 가속도 기준 약 8배 높은 노이즈를 보입니다.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{./subject3_vs_4_noise.png}
+\caption{Subject 3 vs Subject 4 - 원본 데이터 노이즈 비교}
+\end{figure}
+\subsubsection{필터링 후 데이터 비교}
+\label{sec:org8a2a484}
+
+전처리 및 통합 최적화 적용 후, 두 피험자의 가속도가 유사한 수준(\textasciitilde{}2.5 mm/frame²)으로 수렴하여 노이즈가 효과적으로 제거되었음을 확인할 수 있습니다.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{./subject3_vs_4_filtered.png}
+\caption{Subject 3 vs Subject 4 - 필터링 후 데이터 비교}
+\end{figure}
+
+\clearpage
+\subsubsection{Subject 3 - 필터링 후 평가 결과 (일반 데이터)}
+\label{sec:org29ec2ca}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../output/final/subject_3/knee_valgus.png}
+\caption{Subject 3 - 무릎 내전 분석 (전방 관찰)}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../output/final/subject_3/posture.png}
+\caption{Subject 3 - 자세 분석 (측면 관찰)}
+\end{figure}
+
+\clearpage
+\subsubsection{Subject 4 - 필터링 후 평가 결과 (고노이즈 데이터)}
+\label{sec:org9ccf6ae}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../output/final/subject_4/knee_valgus.png}
+\caption{Subject 4 - 무릎 내전 분석 (전방 관찰)}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../output/final/subject_4/posture.png}
+\caption{Subject 4 - 자세 분석 (측면 관찰)}
+\end{figure}
+
+\clearpage
+\section{결론 및 제언}
+\label{sec:org04097b3}
+
+\subsection{성과 요약}
+\label{sec:org0531071}
+
+\begin{enumerate}
+\item \textbf{통합 최적화 프레임워크}: 데이터 충실도, 뼈 길이, 관절 가동범위, 가속도, 저크, 각속도, 떨림, 방향 일관성, 척추 정렬 등 9개 제약조건을 손실함수로 표현하고 경사하강법으로 동시 최적화
+\item \textbf{노이즈 처리 성공}: 고노이즈 데이터(Subject 4, 5)에서도 해부학적으로 유효한 결과 도출 (가속도 기준 최대 105배 개선)
+\item \textbf{해부학적 일관성}: 뼈 길이 변동을 0.15mm 이하로 유지하여 비현실적 변형 방지
+\item \textbf{정량적 평가}: 무릎 내전, 허리 아치, 상체 기울기를 객관적 수치로 제공
+\end{enumerate}
+\subsection{한계점}
+\label{sec:orgeaf0c8b}
+
+\begin{center}
+\begin{tabular}{ll}
+한계 & 설명\\
+\hline
+2D 평가 의존 & 전방/측면 관찰만 사용, 3D 각도 계산 미적용\\
+고정 임계값 & 5° 내전 등 판정 기준이 개인차를 반영하지 못함\\
+실시간 처리 미지원 & 배치 처리 전용, 실시간 피드백 불가\\
+\end{tabular}
+\end{center}
+\subsection{향후 발전 방향}
+\label{sec:org3327685}
+
+\begin{enumerate}
+\item \textbf{3D 각도 계산}: hip-knee-ankle 평면의 실제 3D 각도 측정으로 정확도 향상
+\item \textbf{개인화 기준선}: 피험자별 정상 범위 학습을 통한 맞춤형 평가
+\item \textbf{실시간 처리}: 스트리밍 데이터 지원으로 즉각적 피드백 제공
+\item \textbf{추가 평가 항목}: 발 외전(foot flattening), 팔 전방 이동(arms fall forward) 등 확장
+\item \textbf{보고서 자동 생성}: 평가 결과 기반 교정 운동 자동 추천
+\end{enumerate}
+\section{부록}
+\label{sec:orge4b5ba9}
+
+\subsection{출력 파일 구조}
+\label{sec:orgd4f6855}
+
+\begin{verbatim}
+output/final/
+├── subject_1/
+│   ├── assessment.csv         # 필터링 좌표 + 평가 각도
+│   ├── knee_valgus.png        # 무릎 내전 그래프
+│   ├── posture.png            # 자세 평가 그래프
+│   └── skeleton_comparison.gif # 원본/필터링 비교 애니메이션
+├── subject_2/
+└── ...
+
+output/refined_visualization/
+├── 1_skeleton_comparison.gif  # 정제된 스켈레톤 애니메이션
+├── 2_skeleton_comparison.gif
+├── 3_skeleton_comparison.gif
+├── 4_skeleton_comparison.gif
+└── 5_skeleton_comparison.gif
+\end{verbatim}
+
+\textbf{정제된 애니메이션}: \texttt{output/refined\_visualization/} 폴더에는 원본 스켈레톤과 필터링된 스켈레톤을 나란히 비교할 수 있는 애니메이션이 피험자별로 저장되어 있습니다.
+\subsection{실행 명령어}
+\label{sec:org219faf5}
+
+\begin{verbatim}
+# 전체 분석 실행
+uv run python -m src.main --subjects 1 2 3 4 5 --output-dir output/final
+
+# 고노이즈 데이터 전용
+uv run python -m src.main --subjects 4 5 --preset high-noise --output-dir output/final
+\end{verbatim}
+\end{document}

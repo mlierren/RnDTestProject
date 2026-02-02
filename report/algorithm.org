@@ -1,0 +1,548 @@
+#+TITLE: NASM 오버헤드 스쿼트 평가 시스템 - 알고리즘 문서
+#+AUTHOR: Kim Daewon
+#+DATE: {{{time(%Y-%m-%d)}}}
+#+PROPERTY: header-args:jupyter-python :session algorithm :kernel nasm-assessment
+#+OPTIONS: toc:3 num:t author:t date:t
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [a4paper,11pt]
+#+LATEX_HEADER: \usepackage{kotex}
+#+LATEX_HEADER: \usepackage{graphicx}
+#+LATEX_HEADER: \usepackage{booktabs}
+#+LATEX_HEADER: \usepackage{float}
+#+LATEX_HEADER: \usepackage[margin=2.5cm]{geometry}
+#+LATEX_HEADER: \usepackage{xcolor}
+#+LATEX_HEADER: \usepackage{amsmath}
+#+LATEX_HEADER: \usepackage{amssymb}
+#+LATEX_HEADER: \usepackage[font=small,labelfont=bf,skip=5pt]{caption}
+#+LATEX_HEADER: \definecolor{highlight}{RGB}{52, 152, 219}
+
+* 개요
+
+본 문서는 NASM 오버헤드 스쿼트 평가 시스템의 핵심 알고리즘을 설명합니다. 시스템은 크게 세 단계로 구성됩니다:
+
+1. *전처리 (Preprocessing)*: 원본 데이터의 노이즈 제거
+2. *통합 최적화 (Unified Optimization)*: 다중 제약조건을 만족하는 궤적 생성
+3. *평가 (Assessment)*: NASM 기준에 따른 자세 분석
+
+#+BEGIN_SRC jupyter-python :exports none
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import FancyBboxPatch
+
+plt.rcParams['font.family'] = 'AppleGothic'
+plt.rcParams['axes.unicode_minus'] = False
+
+fig, ax = plt.subplots(figsize=(14, 6), facecolor='white')
+
+colors = {
+    'input': '#E8F6F3', 'prep': '#D5F5E3',
+    'opt': '#D4E6F1', 'assess': '#FCF3CF', 'output': '#FADBD8'
+}
+
+boxes = [
+    (1, 3, '원본\n데이터', colors['input']),
+    (4, 3, '전처리', colors['prep']),
+    (7, 3, '통합\n최적화', colors['opt']),
+    (10, 3, 'NASM\n평가', colors['assess']),
+]
+
+for x, y, label, color in boxes:
+    box = FancyBboxPatch((x-0.8, y-0.5), 1.6, 1.0,
+                          boxstyle='round,pad=0.05,rounding_size=0.2',
+                          facecolor=color, edgecolor='#333', linewidth=2)
+    ax.add_patch(box)
+    ax.text(x, y, label, ha='center', va='center', fontsize=11, fontweight='bold')
+
+arrow_style = dict(arrowstyle='->', color='#333', lw=2, mutation_scale=15)
+for i in range(len(boxes)-1):
+    x1, x2 = boxes[i][0] + 0.8, boxes[i+1][0] - 0.8
+    ax.annotate('', xy=(x2, 3), xytext=(x1, 3), arrowprops=arrow_style)
+
+sub_items = {
+    4: ['NaN 보간', '스파이크 제거', '저역통과 필터'],
+    7: ['9개 손실함수', '적응형 신뢰도', 'Adam 최적화'],
+    10: ['무릎 내전', '허리 아치', '상체 기울기'],
+}
+
+for x, items in sub_items.items():
+    color = colors['prep'] if x == 3 else colors['opt'] if x == 6 else colors['assess']
+    for i, item in enumerate(items):
+        y = 1.5 - i * 0.6
+        box = FancyBboxPatch((x-0.9, y-0.2), 1.8, 0.4,
+                              boxstyle='round,pad=0.02,rounding_size=0.1',
+                              facecolor=color, edgecolor='#666', linewidth=1)
+        ax.add_patch(box)
+        ax.text(x, y, item, ha='center', va='center', fontsize=9)
+    ax.plot([x, x], [2.5, 1.9], color='#666', lw=1, ls='--')
+
+ax.set_xlim(-0.5, 12); ax.set_ylim(-0.5, 4.5)
+ax.set_aspect('equal'); ax.axis('off')
+ax.set_title('NASM 오버헤드 스쿼트 평가 시스템 파이프라인', fontsize=14, fontweight='bold', pad=15)
+plt.savefig('pipeline.png', dpi=150, bbox_inches='tight', facecolor='white')
+plt.close()
+#+END_SRC
+
+#+RESULTS:
+
+#+CAPTION: 시스템 파이프라인 개요
+#+ATTR_LATEX: :width 0.95\textwidth :placement [H]
+[[file:pipeline.png]]
+
+* 전처리 (Preprocessing)
+
+전처리 단계는 센서 오류와 고주파 노이즈를 제거하여 최적화의 초기값을 준비합니다.
+
+** NaN 값 선형 보간
+
+결측치(NaN)가 있는 프레임은 인접한 유효 프레임으로부터 선형 보간합니다.
+
+각 관절 \(j\)와 좌표 축 \(d \in \{x, y, z\}\)에 대해:
+
+\begin{equation}
+p_{t,j,d} = p_{t_1,j,d} + \frac{t - t_1}{t_2 - t_1}(p_{t_2,j,d} - p_{t_1,j,d})
+\end{equation}
+
+여기서 \(t_1, t_2\)는 \(t\) 이전/이후의 가장 가까운 유효 프레임입니다.
+
+** MAD 기반 스파이크 감지
+
+센서 오류로 인한 급격한 위치 변화(스파이크)를 Median Absolute Deviation(MAD)으로 감지합니다.
+
+*** MAD 계산
+
+\begin{equation}
+\text{MAD} = \text{median}(|x_i - \text{median}(x)|)
+\end{equation}
+
+정규분포를 가정할 때 MAD와 표준편차의 관계:
+
+\begin{equation}
+\hat{\sigma} = 1.4826 \times \text{MAD}
+\end{equation}
+
+*** 스파이크 판정
+
+다음 조건을 만족하면 스파이크로 판정합니다:
+
+\begin{equation}
+|x_i - \text{median}(x)| > k \times \hat{\sigma}
+\end{equation}
+
+여기서 \(k = 3.0\) (설정 가능한 임계값).
+
+*** 적용 대상
+
+- 각 관절의 x, y, z 좌표값
+- 속도 크기 (velocity magnitude): \(\|v_t\| = \|p_{t+1} - p_{t-1}\| / 2\)
+
+감지된 스파이크는 선형 보간으로 대체됩니다.
+
+** Butterworth 저역통과 필터
+
+고주파 노이즈를 제거하기 위해 2차 Butterworth 필터를 적용합니다.
+
+*** 주파수 응답
+
+Butterworth 필터는 통과대역에서 최대한 평탄한 주파수 응답을 가집니다:
+
+\begin{equation}
+|H(j\omega)|^2 = \frac{1}{1 + (\omega/\omega_c)^{2n}}
+\end{equation}
+
+여기서:
+- \(\omega_c\): 차단 주파수 (cutoff frequency)
+- \(n\): 필터 차수 (본 시스템에서 \(n=2\))
+
+*** 정규화 차단 주파수
+
+디지털 필터 설계를 위해 차단 주파수를 정규화합니다:
+
+\begin{equation}
+\omega_{\text{norm}} = \frac{f_c}{f_s / 2} = \frac{f_c}{f_{\text{Nyquist}}}
+\end{equation}
+
+여기서:
+- \(f_c\): 차단 주파수 (Hz), 일반: 3.0 Hz, 고노이즈: 2.0 Hz
+- \(f_s\): 샘플링 주파수 (30 fps)
+- \(f_{\text{Nyquist}} = 15\) Hz
+
+*** Zero-Phase 필터링
+
+위상 왜곡을 방지하기 위해 =filtfilt= 함수를 사용합니다:
+
+1. 순방향 필터링: \(y_1 = H(z) \cdot x\)
+2. 역방향 필터링: \(y = H(z) \cdot \text{reverse}(y_1)\)
+
+결과적으로 위상 지연 없이 진폭 응답만 \(|H(j\omega)|^2\)가 됩니다.
+
+* 통합 최적화 (Unified Optimization)
+
+전처리된 데이터를 초기값으로, 9개의 손실함수를 동시에 최소화하는 최적화를 수행합니다.
+
+** 최적화 문제 정의
+
+\begin{equation}
+\min_{\mathbf{P}} \mathcal{L}_{\text{total}} = \sum_{i=1}^{9} w_i \mathcal{L}_i(\mathbf{P})
+\end{equation}
+
+여기서 \(\mathbf{P} \in \mathbb{R}^{T \times J \times 3}\)는 최적화 대상인 관절 위치 (\(T\): 프레임 수, \(J\): 관절 수).
+
+** 손실함수 (Loss Functions)
+
+*** 데이터 충실도 (Data Fidelity) - \(w = 1.0\)
+
+원본 데이터와의 거리를 최소화합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{data}} = \frac{1}{TJ} \sum_{t,j} c_{t,j} \|\mathbf{p}_{t,j} - \mathbf{p}^{\text{orig}}_{t,j}\|^2
+\end{equation}
+
+여기서 \(c_{t,j}\)는 적응형 신뢰도 가중치 (아래 참조).
+
+*** 뼈 길이 일관성 (Bone Length) - \(w = 100.0\)
+
+해부학적으로 뼈 길이는 일정해야 합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{bone}} = \frac{1}{TB} \sum_{t,b} \left( \|\mathbf{p}_{t,\text{child}(b)} - \mathbf{p}_{t,\text{parent}(b)}\| - L_b \right)^2
+\end{equation}
+
+여기서 \(L_b\)는 전처리에서 계산된 참조 뼈 길이.
+
+*** 관절 가동 범위 (ROM) - \(w = 50.0\)
+
+관절 각도가 생리학적 범위를 벗어나면 페널티를 부과합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{ROM}} = \frac{1}{TK} \sum_{t,k} \max(0, \theta_{\min,k} - \theta_{t,k})^2 + \max(0, \theta_{t,k} - \theta_{\max,k})^2
+\end{equation}
+
+| 관절 | 각도 정의 | 최소 | 최대 | 설명 |
+|------+-------------------------+------+------+------|
+| 무릎 (좌/우) | hip - knee - ankle | 0° | 170° | 완전 신전 ~ 최대 굴곡 |
+| 고관절 (좌/우) | waist - hip - knee | 30° | 180° | 최대 굴곡 ~ 완전 신전 |
+| 팔꿈치 (좌/우) | shoulder - elbow - wrist | 10° | 180° | 완전 신전 ~ 최대 굴곡 |
+| 어깨 (좌/우) | torso - shoulder - elbow | 5° | 180° | 이완 ~ 완전 거상 |
+| 목 | head - torso - waist | 90° | 180° | 머리-몸통-허리 정렬 |
+| 허리 (좌/우) | torso - waist - hip | 60° | 180° | 요추 굴곡 범위 |
+
+*** 가속도 평활화 (Acceleration) - \(w = 10.0\)
+
+급격한 가속을 억제하여 부드러운 움직임을 유도합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{accel}} = \frac{1}{(T-2)J} \sum_{t=1}^{T-2} \sum_j \|\mathbf{p}_{t+1,j} - 2\mathbf{p}_{t,j} + \mathbf{p}_{t-1,j}\|^2
+\end{equation}
+
+*** 저크 평활화 (Jerk) - \(w = 5.0\)
+
+가속도의 변화율(저크)을 최소화하여 더욱 자연스러운 움직임을 유도합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{jerk}} = \frac{1}{(T-3)J} \sum_{t=1}^{T-3} \sum_j \|\mathbf{a}_{t+1,j} - \mathbf{a}_{t,j}\|^2
+\end{equation}
+
+여기서 \(\mathbf{a}_t\)는 \(t\)시점의 가속도.
+
+*** 떨림 억제 (Tremor) - \(w = 20.0\)
+
+이동평균과의 편차를 최소화하여 떨림을 제거합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{tremor}} = \frac{1}{TJ} \sum_{t,j} \|\mathbf{p}_{t,j} - \bar{\mathbf{p}}_{t,j}\|^2
+\end{equation}
+
+여기서 \(\bar{\mathbf{p}}_{t,j}\)는 윈도우 크기 5의 이동평균.
+
+*** 방향 일관성 (Direction) - \(w = 15.0\)
+
+속도 방향의 급격한 변화를 억제합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{dir}} = \frac{1}{(T-2)J} \sum_{t=1}^{T-2} \sum_j (1 - \cos(\mathbf{v}_{t-1,j}, \mathbf{v}_{t,j}))
+\end{equation}
+
+여기서 \(\mathbf{v}_t = \mathbf{p}_{t+1} - \mathbf{p}_t\).
+
+*** 위치 변화 일관성 (Position Delta) - \(w = 5.0\)
+
+연속 프레임 간 위치 변화량을 부드럽게 유지합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{delta}} = \frac{1}{(T-2)J} \sum_{t=1}^{T-2} \sum_j \|\Delta\mathbf{p}_{t+1,j} - \Delta\mathbf{p}_{t,j}\|^2
+\end{equation}
+
+여기서 \(\Delta\mathbf{p}_t = \mathbf{p}_{t+1} - \mathbf{p}_t\).
+
+*** 척추 정렬 (Spine Alignment) - \(w = 200.0\)
+
+머리-몸통-허리의 일관된 정렬을 유지합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{spine}} = \frac{1}{T-1} \sum_{t=1}^{T-1} |\theta^{\text{spine}}_t - \theta^{\text{spine}}_{t-1}|^2
+\end{equation}
+
+여기서 \(\theta^{\text{spine}}_t\)는 head-torso-waist가 이루는 각도.
+
+이 손실함수는 상체 기울기가 프레임 간에 비현실적으로 급변하는 것을 방지합니다.
+
+** 적응형 신뢰도 가중치 (Adaptive Confidence)
+
+데이터 품질에 따라 프레임별로 다른 가중치를 적용합니다.
+
+*** 뼈 길이 편차 기반 신뢰도
+
+각 프레임의 뼈 길이가 참조값에서 벗어난 정도로 신뢰도를 계산합니다:
+
+\begin{equation}
+r_t = \frac{1}{B} \sum_b \left| \frac{l_{t,b} - L_b}{L_b} \right|
+\end{equation}
+
+*** MAD 기반 정규화
+
+\begin{equation}
+c_t = \exp\left( -\alpha \cdot \frac{r_t}{\text{median}(r) + \epsilon} \right)
+\end{equation}
+
+여기서 \(\alpha = 2.0\) (강도 파라미터).
+
+*** 효과
+
+- 뼈 길이가 일관된 프레임 → 높은 신뢰도 → 원본에 가깝게 유지
+- 뼈 길이가 불안정한 프레임 → 낮은 신뢰도 → 최적화로 더 많이 수정
+
+** Adam 최적화
+
+PyTorch의 Adam 최적화기를 사용합니다.
+
+*** 하이퍼파라미터
+
+| 파라미터 | 값 | 설명 |
+|----------+----+------|
+| Learning rate | 0.1 | 초기 학습률 |
+| \(\beta_1\) | 0.9 | 1차 모멘트 감쇠 |
+| \(\beta_2\) | 0.999 | 2차 모멘트 감쇠 |
+| Max iterations | 5,000 | 최대 반복 횟수 |
+| Tolerance | \(10^{-6}\) | 수렴 판정 기준 |
+
+*** 수렴 조건
+
+\begin{equation}
+\frac{|\mathcal{L}_{k-1} - \mathcal{L}_k|}{\max(|\mathcal{L}_{k-1}|, 1)} < \text{tol}
+\end{equation}
+
+*** NaN 복구 메커니즘
+
+수치적 불안정으로 NaN이 발생하면:
+
+1. 이전 유효 상태로 롤백
+2. 학습률을 50%로 감소
+3. 작은 노이즈(\(\sigma = 0.01\)mm)를 추가하여 local minimum 탈출
+4. 최적화 재개
+
+* NASM 평가 알고리즘
+
+최적화된 관절 위치로부터 NASM 오버헤드 스쿼트의 세 가지 핵심 지표를 계산합니다.
+
+** 무릎 내전 (Knee Valgus) - 전방 관찰
+
+무릎이 발목-고관절 축에서 안쪽으로 벗어난 정도를 측정합니다.
+
+*** 기준선 정의
+
+정면(전방) 관찰 시 고관절-발목을 잇는 직선을 기준선으로 합니다:
+
+\begin{equation}
+\mathbf{v}_{\text{ref}} = \mathbf{p}_{\text{ankle}} - \mathbf{p}_{\text{hip}}
+\end{equation}
+
+XY 평면(전방 뷰)에서 이 벡터를 정규화합니다.
+
+*** 무릎 편차 계산
+
+무릎의 수평(X축) 위치가 기준선에서 벗어난 정도:
+
+\begin{equation}
+d = x_{\text{knee}} - x_{\text{ref}}
+\end{equation}
+
+여기서 \(x_{\text{ref}}\)는 무릎 높이에서 기준선의 X좌표.
+
+*** 각도 변환
+
+\begin{equation}
+\theta_{\text{valgus}} = \arctan\left( \frac{d}{y_{\text{hip}} - y_{\text{knee}}} \right)
+\end{equation}
+
+*** 판정 기준
+
+| 각도 | 판정 |
+|------+------|
+| \(\theta > 5°\) | *내전 (Valgus)* - 보정 필요 |
+| \(-5° \leq \theta \leq 5°\) | 정상 범위 |
+| \(\theta < -5°\) | 외전 (Varus) |
+
+** 허리 아치 (Back Arch) - 측면 관찰
+
+요추부의 과전만 또는 평평해짐을 측정합니다.
+
+*** 벡터 정의
+
+- 상부 척추 벡터: \(\mathbf{v}_{\text{upper}} = \mathbf{p}_{\text{torso}} - \mathbf{p}_{\text{head}}\)
+- 하부 척추 벡터: \(\mathbf{v}_{\text{lower}} = \mathbf{p}_{\text{waist}} - \mathbf{p}_{\text{torso}}\)
+
+*** 각도 계산
+
+\begin{equation}
+\theta_{\text{arch}} = \arccos\left( \frac{\mathbf{v}_{\text{upper}} \cdot \mathbf{v}_{\text{lower}}}{\|\mathbf{v}_{\text{upper}}\| \|\mathbf{v}_{\text{lower}}\|} \right)
+\end{equation}
+
+*** 해석
+
+| 각도 | 의미 |
+|------+------|
+| \(\theta \approx 180°\) | 척추가 일직선 (정상) |
+| \(\theta < 150°\) | 과도한 굴곡 |
+| \(\theta > 200°\) | 과전만 (lordosis) |
+
+** 상체 기울기 (Torso Lean) - 측면 관찰
+
+몸통이 수직에서 앞으로 숙여진 정도를 측정합니다.
+
+*** 몸통 벡터
+
+\begin{equation}
+\mathbf{v}_{\text{torso}} = \mathbf{p}_{\text{torso}} - \mathbf{p}_{\text{waist}}
+\end{equation}
+
+*** 수직 기준
+
+\begin{equation}
+\mathbf{v}_{\text{vertical}} = [0, 1, 0]^T
+\end{equation}
+
+*** 각도 계산 (YZ 평면)
+
+측면에서 관찰하므로 YZ 평면에 투영합니다:
+
+\begin{equation}
+\theta_{\text{lean}} = \arctan2(v_z, v_y) - 90°
+\end{equation}
+
+여기서 음수 값은 앞으로 기울어짐을 의미합니다.
+
+*** 판정 기준
+
+| 각도 | 판정 |
+|------+------|
+| \(\lvert\theta\rvert < 15°\) | 정상 범위 |
+| \(15° \leq \lvert\theta\rvert < 25°\) | *주의* |
+| \(\lvert\theta\rvert \geq 25°\) | *과도한 기울기* - 보정 필요 |
+
+* 부록
+
+** 관절 정의
+
+| 인덱스 | 관절명 | 영문 |
+|--------+--------+------|
+| 0 | 머리 | head |
+| 1 | 몸통 | torso |
+| 2 | 허리 | waist |
+| 3 | 왼쪽 어깨 | l_shoulder |
+| 4 | 왼쪽 팔꿈치 | l_elbow |
+| 5 | 왼쪽 손목 | l_wrist |
+| 6 | 오른쪽 어깨 | r_shoulder |
+| 7 | 오른쪽 팔꿈치 | r_elbow |
+| 8 | 오른쪽 손목 | r_wrist |
+| 9 | 왼쪽 고관절 | l_hip |
+| 10 | 왼쪽 무릎 | l_knee |
+| 11 | 왼쪽 발목 | l_ankle |
+| 12 | 오른쪽 고관절 | r_hip |
+| 13 | 오른쪽 무릎 | r_knee |
+| 14 | 오른쪽 발목 | r_ankle |
+
+** 뼈 연결 구조
+
+#+BEGIN_SRC jupyter-python :exports none
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
+# 관절 좌표 정의
+joints = {
+    'head': (0, 10), 'torso': (0, 8), 'waist': (0, 6),
+    'l_shoulder': (-2, 8), 'r_shoulder': (2, 8),
+    'l_elbow': (-3, 6.5), 'r_elbow': (3, 6.5),
+    'l_wrist': (-4, 5), 'r_wrist': (4, 5),
+    'l_hip': (-1, 4), 'r_hip': (1, 4),
+    'l_knee': (-1.2, 2), 'r_knee': (1.2, 2),
+    'l_ankle': (-1.4, 0), 'r_ankle': (1.4, 0),
+}
+
+# 뼈 연결 (parent, child)
+bones = [
+    ('head', 'torso'), ('torso', 'waist'),
+    ('torso', 'l_shoulder'), ('torso', 'r_shoulder'),
+    ('l_shoulder', 'l_elbow'), ('l_elbow', 'l_wrist'),
+    ('r_shoulder', 'r_elbow'), ('r_elbow', 'r_wrist'),
+    ('waist', 'l_hip'), ('waist', 'r_hip'),
+    ('l_hip', 'l_knee'), ('l_knee', 'l_ankle'),
+    ('r_hip', 'r_knee'), ('r_knee', 'r_ankle'),
+]
+
+# 색상 정의
+colors = {
+    'spine': '#E74C3C', 'left_arm': '#3498DB', 'right_arm': '#2ECC71',
+    'left_leg': '#9B59B6', 'right_leg': '#F39C12',
+}
+
+def get_color(parent, child):
+    if {parent, child} <= {'head', 'torso', 'waist'}:
+        return colors['spine']
+    if 'l_' in child and ('shoulder' in child or 'elbow' in child or 'wrist' in child):
+        return colors['left_arm']
+    if 'r_' in child and ('shoulder' in child or 'elbow' in child or 'wrist' in child):
+        return colors['right_arm']
+    if 'l_' in child: return colors['left_leg']
+    if 'r_' in child: return colors['right_leg']
+    return '#333'
+
+fig, ax = plt.subplots(figsize=(8, 10), facecolor='white')
+
+for p, c in bones:
+    x1, y1 = joints[p]; x2, y2 = joints[c]
+    ax.plot([x1, x2], [y1, y2], color=get_color(p, c), linewidth=3, zorder=1)
+
+for name, (x, y) in joints.items():
+    if name in ['head', 'torso', 'waist']: c = colors['spine']
+    elif 'l_' in name and any(s in name for s in ['shoulder', 'elbow', 'wrist']): c = colors['left_arm']
+    elif 'r_' in name and any(s in name for s in ['shoulder', 'elbow', 'wrist']): c = colors['right_arm']
+    elif 'l_' in name: c = colors['left_leg']
+    else: c = colors['right_leg']
+    ax.add_patch(plt.Circle((x, y), 0.25, color=c, zorder=2))
+    label = name.replace('_', ' ').title()
+    ha = 'left' if x >= 0 else 'right'
+    ax.annotate(label, (x, y), xytext=(x + (0.5 if x >= 0 else -0.5), y),
+                fontsize=9, ha=ha, va='center', fontweight='bold', color='#2C3E50')
+
+legend = [mpatches.Patch(color=c, label=l) for l, c in [
+    ('Spine', colors['spine']), ('Left Arm', colors['left_arm']),
+    ('Right Arm', colors['right_arm']), ('Left Leg', colors['left_leg']),
+    ('Right Leg', colors['right_leg'])]]
+ax.legend(handles=legend, loc='upper right', fontsize=9)
+
+ax.set_xlim(-6, 6); ax.set_ylim(-1, 12); ax.set_aspect('equal'); ax.axis('off')
+ax.set_title('Skeleton Bone Structure (14 Bones, 15 Joints)', fontsize=14, fontweight='bold', pad=20)
+plt.savefig('skeleton_structure.png', dpi=150, bbox_inches='tight', facecolor='white')
+plt.close()
+#+END_SRC
+
+#+CAPTION: 스켈레톤 뼈 연결 구조 (14개 뼈, 15개 관절)
+#+ATTR_LATEX: :width 0.6\textwidth :placement [H]
+[[file:skeleton_structure.png]]
+
+** 프리셋 설정
+
+| 프리셋 | 저역통과 Cutoff | 스파이크 임계값 | 대상 |
+|--------+-----------------+-----------------+------|
+| =default= | 3.0 Hz | 3.0 MAD | Subject 1, 2, 3 |
+| =high-noise= | 2.0 Hz | 3.0 MAD | Subject 4, 5 |

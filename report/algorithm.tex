@@ -1,0 +1,489 @@
+% Created 2026-02-02 Mon 23:07
+% Intended LaTeX compiler: pdflatex
+\documentclass[a4paper,11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\usepackage{kotex}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[font=small,labelfont=bf,skip=5pt]{caption}
+\definecolor{highlight}{RGB}{52, 152, 219}
+\author{Kim Daewon}
+\date{2026-02-02}
+\title{NASM 오버헤드 스쿼트 평가 시스템 - 알고리즘 문서}
+\hypersetup{
+ pdfauthor={Kim Daewon},
+ pdftitle={NASM 오버헤드 스쿼트 평가 시스템 - 알고리즘 문서},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={Emacs 30.2 (Org mode 9.7.39)}, 
+ pdflang={English}}
+\begin{document}
+
+\maketitle
+\setcounter{tocdepth}{3}
+\tableofcontents
+
+\section{개요}
+\label{sec:org189bf9a}
+
+본 문서는 NASM 오버헤드 스쿼트 평가 시스템의 핵심 알고리즘을 설명합니다. 시스템은 크게 세 단계로 구성됩니다:
+
+\begin{enumerate}
+\item \textbf{전처리 (Preprocessing)}: 원본 데이터의 노이즈 제거
+\item \textbf{통합 최적화 (Unified Optimization)}: 다중 제약조건을 만족하는 궤적 생성
+\item \textbf{평가 (Assessment)}: NASM 기준에 따른 자세 분석
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{pipeline.png}
+\caption{시스템 파이프라인 개요}
+\end{figure}
+\section{전처리 (Preprocessing)}
+\label{sec:org03b54ff}
+
+전처리 단계는 센서 오류와 고주파 노이즈를 제거하여 최적화의 초기값을 준비합니다.
+\subsection{NaN 값 선형 보간}
+\label{sec:orgd355ad5}
+
+결측치(NaN)가 있는 프레임은 인접한 유효 프레임으로부터 선형 보간합니다.
+
+각 관절 \(j\)와 좌표 축 \(d \in \{x, y, z\}\)에 대해:
+
+\begin{equation}
+p_{t,j,d} = p_{t_1,j,d} + \frac{t - t_1}{t_2 - t_1}(p_{t_2,j,d} - p_{t_1,j,d})
+\end{equation}
+
+여기서 \(t_1, t_2\)는 \(t\) 이전/이후의 가장 가까운 유효 프레임입니다.
+\subsection{MAD 기반 스파이크 감지}
+\label{sec:org9b185d7}
+
+센서 오류로 인한 급격한 위치 변화(스파이크)를 Median Absolute Deviation(MAD)으로 감지합니다.
+\subsubsection{MAD 계산}
+\label{sec:org66f312e}
+
+\begin{equation}
+\text{MAD} = \text{median}(|x_i - \text{median}(x)|)
+\end{equation}
+
+정규분포를 가정할 때 MAD와 표준편차의 관계:
+
+\begin{equation}
+\hat{\sigma} = 1.4826 \times \text{MAD}
+\end{equation}
+\subsubsection{스파이크 판정}
+\label{sec:orgb1cd7e2}
+
+다음 조건을 만족하면 스파이크로 판정합니다:
+
+\begin{equation}
+|x_i - \text{median}(x)| > k \times \hat{\sigma}
+\end{equation}
+
+여기서 \(k = 3.0\) (설정 가능한 임계값).
+\subsubsection{적용 대상}
+\label{sec:org1ab456d}
+
+\begin{itemize}
+\item 각 관절의 x, y, z 좌표값
+\item 속도 크기 (velocity magnitude): \(\|v_t\| = \|p_{t+1} - p_{t-1}\| / 2\)
+\end{itemize}
+
+감지된 스파이크는 선형 보간으로 대체됩니다.
+\subsection{Butterworth 저역통과 필터}
+\label{sec:org67ea585}
+
+고주파 노이즈를 제거하기 위해 2차 Butterworth 필터를 적용합니다.
+\subsubsection{주파수 응답}
+\label{sec:org977749a}
+
+Butterworth 필터는 통과대역에서 최대한 평탄한 주파수 응답을 가집니다:
+
+\begin{equation}
+|H(j\omega)|^2 = \frac{1}{1 + (\omega/\omega_c)^{2n}}
+\end{equation}
+
+여기서:
+\begin{itemize}
+\item \(\omega_c\): 차단 주파수 (cutoff frequency)
+\item \(n\): 필터 차수 (본 시스템에서 \(n=2\))
+\end{itemize}
+\subsubsection{정규화 차단 주파수}
+\label{sec:org64817c3}
+
+디지털 필터 설계를 위해 차단 주파수를 정규화합니다:
+
+\begin{equation}
+\omega_{\text{norm}} = \frac{f_c}{f_s / 2} = \frac{f_c}{f_{\text{Nyquist}}}
+\end{equation}
+
+여기서:
+\begin{itemize}
+\item \(f_c\): 차단 주파수 (Hz), 일반: 3.0 Hz, 고노이즈: 2.0 Hz
+\item \(f_s\): 샘플링 주파수 (30 fps)
+\item \(f_{\text{Nyquist}} = 15\) Hz
+\end{itemize}
+\subsubsection{Zero-Phase 필터링}
+\label{sec:orgb58ad8f}
+
+위상 왜곡을 방지하기 위해 \texttt{filtfilt} 함수를 사용합니다:
+
+\begin{enumerate}
+\item 순방향 필터링: \(y_1 = H(z) \cdot x\)
+\item 역방향 필터링: \(y = H(z) \cdot \text{reverse}(y_1)\)
+\end{enumerate}
+
+결과적으로 위상 지연 없이 진폭 응답만 \(|H(j\omega)|^2\)가 됩니다.
+\section{통합 최적화 (Unified Optimization)}
+\label{sec:orgd51d710}
+
+전처리된 데이터를 초기값으로, 9개의 손실함수를 동시에 최소화하는 최적화를 수행합니다.
+\subsection{최적화 문제 정의}
+\label{sec:orge429cc7}
+
+\begin{equation}
+\min_{\mathbf{P}} \mathcal{L}_{\text{total}} = \sum_{i=1}^{9} w_i \mathcal{L}_i(\mathbf{P})
+\end{equation}
+
+여기서 \(\mathbf{P} \in \mathbb{R}^{T \times J \times 3}\)는 최적화 대상인 관절 위치 (\(T\): 프레임 수, \(J\): 관절 수).
+\subsection{손실함수 (Loss Functions)}
+\label{sec:org12d73be}
+
+\subsubsection{데이터 충실도 (Data Fidelity) - \(w = 1.0\)}
+\label{sec:org1ae068f}
+
+원본 데이터와의 거리를 최소화합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{data}} = \frac{1}{TJ} \sum_{t,j} c_{t,j} \|\mathbf{p}_{t,j} - \mathbf{p}^{\text{orig}}_{t,j}\|^2
+\end{equation}
+
+여기서 \(c_{t,j}\)는 적응형 신뢰도 가중치 (아래 참조).
+\subsubsection{뼈 길이 일관성 (Bone Length) - \(w = 100.0\)}
+\label{sec:org5887826}
+
+해부학적으로 뼈 길이는 일정해야 합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{bone}} = \frac{1}{TB} \sum_{t,b} \left( \|\mathbf{p}_{t,\text{child}(b)} - \mathbf{p}_{t,\text{parent}(b)}\| - L_b \right)^2
+\end{equation}
+
+여기서 \(L_b\)는 전처리에서 계산된 참조 뼈 길이.
+\subsubsection{관절 가동 범위 (ROM) - \(w = 50.0\)}
+\label{sec:orge644f8f}
+
+관절 각도가 생리학적 범위를 벗어나면 페널티를 부과합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{ROM}} = \frac{1}{TK} \sum_{t,k} \max(0, \theta_{\min,k} - \theta_{t,k})^2 + \max(0, \theta_{t,k} - \theta_{\max,k})^2
+\end{equation}
+
+\begin{center}
+\begin{tabular}{lllll}
+관절 & 각도 정의 & 최소 & 최대 & 설명\\
+\hline
+무릎 (좌/우) & hip - knee - ankle & 0° & 170° & 완전 신전 \textasciitilde{} 최대 굴곡\\
+고관절 (좌/우) & waist - hip - knee & 30° & 180° & 최대 굴곡 \textasciitilde{} 완전 신전\\
+팔꿈치 (좌/우) & shoulder - elbow - wrist & 10° & 180° & 완전 신전 \textasciitilde{} 최대 굴곡\\
+어깨 (좌/우) & torso - shoulder - elbow & 5° & 180° & 이완 \textasciitilde{} 완전 거상\\
+목 & head - torso - waist & 90° & 180° & 머리-몸통-허리 정렬\\
+허리 (좌/우) & torso - waist - hip & 60° & 180° & 요추 굴곡 범위\\
+\end{tabular}
+\end{center}
+\subsubsection{가속도 평활화 (Acceleration) - \(w = 10.0\)}
+\label{sec:orgf0da832}
+
+급격한 가속을 억제하여 부드러운 움직임을 유도합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{accel}} = \frac{1}{(T-2)J} \sum_{t=1}^{T-2} \sum_j \|\mathbf{p}_{t+1,j} - 2\mathbf{p}_{t,j} + \mathbf{p}_{t-1,j}\|^2
+\end{equation}
+\subsubsection{저크 평활화 (Jerk) - \(w = 5.0\)}
+\label{sec:orgfb80d59}
+
+가속도의 변화율(저크)을 최소화하여 더욱 자연스러운 움직임을 유도합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{jerk}} = \frac{1}{(T-3)J} \sum_{t=1}^{T-3} \sum_j \|\mathbf{a}_{t+1,j} - \mathbf{a}_{t,j}\|^2
+\end{equation}
+
+여기서 \(\mathbf{a}_t\)는 \(t\)시점의 가속도.
+\subsubsection{떨림 억제 (Tremor) - \(w = 20.0\)}
+\label{sec:org3401774}
+
+이동평균과의 편차를 최소화하여 떨림을 제거합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{tremor}} = \frac{1}{TJ} \sum_{t,j} \|\mathbf{p}_{t,j} - \bar{\mathbf{p}}_{t,j}\|^2
+\end{equation}
+
+여기서 \(\bar{\mathbf{p}}_{t,j}\)는 윈도우 크기 5의 이동평균.
+\subsubsection{방향 일관성 (Direction) - \(w = 15.0\)}
+\label{sec:org4c1d64f}
+
+속도 방향의 급격한 변화를 억제합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{dir}} = \frac{1}{(T-2)J} \sum_{t=1}^{T-2} \sum_j (1 - \cos(\mathbf{v}_{t-1,j}, \mathbf{v}_{t,j}))
+\end{equation}
+
+여기서 \(\mathbf{v}_t = \mathbf{p}_{t+1} - \mathbf{p}_t\).
+\subsubsection{위치 변화 일관성 (Position Delta) - \(w = 5.0\)}
+\label{sec:org0a3b6a5}
+
+연속 프레임 간 위치 변화량을 부드럽게 유지합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{delta}} = \frac{1}{(T-2)J} \sum_{t=1}^{T-2} \sum_j \|\Delta\mathbf{p}_{t+1,j} - \Delta\mathbf{p}_{t,j}\|^2
+\end{equation}
+
+여기서 \(\Delta\mathbf{p}_t = \mathbf{p}_{t+1} - \mathbf{p}_t\).
+\subsubsection{척추 정렬 (Spine Alignment) - \(w = 200.0\)}
+\label{sec:org8840b16}
+
+머리-몸통-허리의 일관된 정렬을 유지합니다:
+
+\begin{equation}
+\mathcal{L}_{\text{spine}} = \frac{1}{T-1} \sum_{t=1}^{T-1} |\theta^{\text{spine}}_t - \theta^{\text{spine}}_{t-1}|^2
+\end{equation}
+
+여기서 \(\theta^{\text{spine}}_t\)는 head-torso-waist가 이루는 각도.
+
+이 손실함수는 상체 기울기가 프레임 간에 비현실적으로 급변하는 것을 방지합니다.
+\subsection{적응형 신뢰도 가중치 (Adaptive Confidence)}
+\label{sec:org5f37d90}
+
+데이터 품질에 따라 프레임별로 다른 가중치를 적용합니다.
+\subsubsection{뼈 길이 편차 기반 신뢰도}
+\label{sec:org73d6852}
+
+각 프레임의 뼈 길이가 참조값에서 벗어난 정도로 신뢰도를 계산합니다:
+
+\begin{equation}
+r_t = \frac{1}{B} \sum_b \left| \frac{l_{t,b} - L_b}{L_b} \right|
+\end{equation}
+\subsubsection{MAD 기반 정규화}
+\label{sec:org6722afd}
+
+\begin{equation}
+c_t = \exp\left( -\alpha \cdot \frac{r_t}{\text{median}(r) + \epsilon} \right)
+\end{equation}
+
+여기서 \(\alpha = 2.0\) (강도 파라미터).
+\subsubsection{효과}
+\label{sec:org55ec447}
+
+\begin{itemize}
+\item 뼈 길이가 일관된 프레임 → 높은 신뢰도 → 원본에 가깝게 유지
+\item 뼈 길이가 불안정한 프레임 → 낮은 신뢰도 → 최적화로 더 많이 수정
+\end{itemize}
+\subsection{Adam 최적화}
+\label{sec:orgebf3f58}
+
+PyTorch의 Adam 최적화기를 사용합니다.
+\subsubsection{하이퍼파라미터}
+\label{sec:org08ccfcf}
+
+\begin{center}
+\begin{tabular}{lrl}
+파라미터 & 값 & 설명\\
+\hline
+Learning rate & 0.1 & 초기 학습률\\
+\(\beta_1\) & 0.9 & 1차 모멘트 감쇠\\
+\(\beta_2\) & 0.999 & 2차 모멘트 감쇠\\
+Max iterations & 5,000 & 최대 반복 횟수\\
+Tolerance & \(10^{-6}\) & 수렴 판정 기준\\
+\end{tabular}
+\end{center}
+\subsubsection{수렴 조건}
+\label{sec:org30a40ea}
+
+\begin{equation}
+\frac{|\mathcal{L}_{k-1} - \mathcal{L}_k|}{\max(|\mathcal{L}_{k-1}|, 1)} < \text{tol}
+\end{equation}
+\subsubsection{NaN 복구 메커니즘}
+\label{sec:org3ae5e93}
+
+수치적 불안정으로 NaN이 발생하면:
+
+\begin{enumerate}
+\item 이전 유효 상태로 롤백
+\item 학습률을 50\%로 감소
+\item 작은 노이즈(\(\sigma = 0.01\)mm)를 추가하여 local minimum 탈출
+\item 최적화 재개
+\end{enumerate}
+\section{NASM 평가 알고리즘}
+\label{sec:org57d710a}
+
+최적화된 관절 위치로부터 NASM 오버헤드 스쿼트의 세 가지 핵심 지표를 계산합니다.
+\subsection{무릎 내전 (Knee Valgus) - 전방 관찰}
+\label{sec:org0068327}
+
+무릎이 발목-고관절 축에서 안쪽으로 벗어난 정도를 측정합니다.
+\subsubsection{기준선 정의}
+\label{sec:org250bb84}
+
+정면(전방) 관찰 시 고관절-발목을 잇는 직선을 기준선으로 합니다:
+
+\begin{equation}
+\mathbf{v}_{\text{ref}} = \mathbf{p}_{\text{ankle}} - \mathbf{p}_{\text{hip}}
+\end{equation}
+
+XY 평면(전방 뷰)에서 이 벡터를 정규화합니다.
+\subsubsection{무릎 편차 계산}
+\label{sec:org34a1d57}
+
+무릎의 수평(X축) 위치가 기준선에서 벗어난 정도:
+
+\begin{equation}
+d = x_{\text{knee}} - x_{\text{ref}}
+\end{equation}
+
+여기서 \(x_{\text{ref}}\)는 무릎 높이에서 기준선의 X좌표.
+\subsubsection{각도 변환}
+\label{sec:org46eefa4}
+
+\begin{equation}
+\theta_{\text{valgus}} = \arctan\left( \frac{d}{y_{\text{hip}} - y_{\text{knee}}} \right)
+\end{equation}
+\subsubsection{판정 기준}
+\label{sec:org52f1bd3}
+
+\begin{center}
+\begin{tabular}{ll}
+각도 & 판정\\
+\hline
+\(\theta > 5°\) & \textbf{내전 (Valgus)} - 보정 필요\\
+\(-5° \leq \theta \leq 5°\) & 정상 범위\\
+\(\theta < -5°\) & 외전 (Varus)\\
+\end{tabular}
+\end{center}
+\subsection{허리 아치 (Back Arch) - 측면 관찰}
+\label{sec:orgead13b2}
+
+요추부의 과전만 또는 평평해짐을 측정합니다.
+\subsubsection{벡터 정의}
+\label{sec:orgfedb177}
+
+\begin{itemize}
+\item 상부 척추 벡터: \(\mathbf{v}_{\text{upper}} = \mathbf{p}_{\text{torso}} - \mathbf{p}_{\text{head}}\)
+\item 하부 척추 벡터: \(\mathbf{v}_{\text{lower}} = \mathbf{p}_{\text{waist}} - \mathbf{p}_{\text{torso}}\)
+\end{itemize}
+\subsubsection{각도 계산}
+\label{sec:orgc044759}
+
+\begin{equation}
+\theta_{\text{arch}} = \arccos\left( \frac{\mathbf{v}_{\text{upper}} \cdot \mathbf{v}_{\text{lower}}}{\|\mathbf{v}_{\text{upper}}\| \|\mathbf{v}_{\text{lower}}\|} \right)
+\end{equation}
+\subsubsection{해석}
+\label{sec:org3668f4d}
+
+\begin{center}
+\begin{tabular}{ll}
+각도 & 의미\\
+\hline
+\(\theta \approx 180°\) & 척추가 일직선 (정상)\\
+\(\theta < 150°\) & 과도한 굴곡\\
+\(\theta > 200°\) & 과전만 (lordosis)\\
+\end{tabular}
+\end{center}
+\subsection{상체 기울기 (Torso Lean) - 측면 관찰}
+\label{sec:org22cff54}
+
+몸통이 수직에서 앞으로 숙여진 정도를 측정합니다.
+\subsubsection{몸통 벡터}
+\label{sec:org3d08bee}
+
+\begin{equation}
+\mathbf{v}_{\text{torso}} = \mathbf{p}_{\text{torso}} - \mathbf{p}_{\text{waist}}
+\end{equation}
+\subsubsection{수직 기준}
+\label{sec:orgfd3ec95}
+
+\begin{equation}
+\mathbf{v}_{\text{vertical}} = [0, 1, 0]^T
+\end{equation}
+\subsubsection{각도 계산 (YZ 평면)}
+\label{sec:org4561d10}
+
+측면에서 관찰하므로 YZ 평면에 투영합니다:
+
+\begin{equation}
+\theta_{\text{lean}} = \arctan2(v_z, v_y) - 90°
+\end{equation}
+
+여기서 음수 값은 앞으로 기울어짐을 의미합니다.
+\subsubsection{판정 기준}
+\label{sec:orga02f124}
+
+\begin{center}
+\begin{tabular}{ll}
+각도 & 판정\\
+\hline
+\(\lvert\theta\rvert < 15°\) & 정상 범위\\
+\(15° \leq \lvert\theta\rvert < 25°\) & \textbf{주의}\\
+\(\lvert\theta\rvert \geq 25°\) & \textbf{과도한 기울기} - 보정 필요\\
+\end{tabular}
+\end{center}
+\section{부록}
+\label{sec:org3dc7fef}
+
+\subsection{관절 정의}
+\label{sec:orgd222760}
+
+\begin{center}
+\begin{tabular}{rll}
+인덱스 & 관절명 & 영문\\
+\hline
+0 & 머리 & head\\
+1 & 몸통 & torso\\
+2 & 허리 & waist\\
+3 & 왼쪽 어깨 & l\textsubscript{shoulder}\\
+4 & 왼쪽 팔꿈치 & l\textsubscript{elbow}\\
+5 & 왼쪽 손목 & l\textsubscript{wrist}\\
+6 & 오른쪽 어깨 & r\textsubscript{shoulder}\\
+7 & 오른쪽 팔꿈치 & r\textsubscript{elbow}\\
+8 & 오른쪽 손목 & r\textsubscript{wrist}\\
+9 & 왼쪽 고관절 & l\textsubscript{hip}\\
+10 & 왼쪽 무릎 & l\textsubscript{knee}\\
+11 & 왼쪽 발목 & l\textsubscript{ankle}\\
+12 & 오른쪽 고관절 & r\textsubscript{hip}\\
+13 & 오른쪽 무릎 & r\textsubscript{knee}\\
+14 & 오른쪽 발목 & r\textsubscript{ankle}\\
+\end{tabular}
+\end{center}
+\subsection{뼈 연결 구조}
+\label{sec:org78c8657}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{skeleton_structure.png}
+\caption{스켈레톤 뼈 연결 구조 (14개 뼈, 15개 관절)}
+\end{figure}
+\subsection{프리셋 설정}
+\label{sec:org47e797f}
+
+\begin{center}
+\begin{tabular}{llll}
+프리셋 & 저역통과 Cutoff & 스파이크 임계값 & 대상\\
+\hline
+\texttt{default} & 3.0 Hz & 3.0 MAD & Subject 1, 2, 3\\
+\texttt{high-noise} & 2.0 Hz & 3.0 MAD & Subject 4, 5\\
+\end{tabular}
+\end{center}
+\end{document}

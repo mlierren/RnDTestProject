@@ -36,6 +36,7 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
+.ob-jupyter/
 
 # Testing
 .pytest_cache/
